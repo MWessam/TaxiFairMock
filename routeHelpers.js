@@ -3,7 +3,7 @@
 
 // Calculates driving distance between two points using OpenRouteService
 export async function getRouteDistanceORS(start, end) {
-  const apiKey = 'YOUR_ORS_API_KEY'; // <-- Replace with your real key!
+  const apiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImRkZGE0M2MyYWVmNDRkYzFiYWRmMzMyN2IzMzhmMzMxIiwiaCI6Im11cm11cjY0In0='; // <-- Replace with your real key!
   const url = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${apiKey}&start=${start.lng},${start.lat}&end=${end.lng},${end.lat}`;
   try {
     const res = await fetch(url);
