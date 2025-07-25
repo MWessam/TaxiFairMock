@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { saveTrip } from '../../firestoreHelpers';
 
 export default function FareResults() {
   const params = useLocalSearchParams();
@@ -8,6 +9,7 @@ export default function FareResults() {
   const [paidFare, setPaidFare] = useState(params.paidFare || '');
   const [showResults, setShowResults] = useState(!!params.paidFare);
   const [inputValue, setInputValue] = useState(params.paidFare || '');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!params.paidFare) {
@@ -21,10 +23,32 @@ export default function FareResults() {
     }
   }, [params.paidFare, params.from, params.to, params.estimate]);
 
-  const handlePaidFareSubmit = () => {
+  const handlePaidFareSubmit = async () => {
     if (!inputValue) return;
     setPaidFare(inputValue);
     setShowResults(true);
+    
+    // If we have trip data and we're in estimate mode, save the trip
+    if (params.tripData) {
+      setSaving(true);
+      try {
+        const tripData = JSON.parse(params.tripData);
+        // Update the trip data with the paid fare
+        tripData.fare = Number(inputValue);
+        
+        const success = await saveTrip(tripData);
+        if (success) {
+          Alert.alert('تم حفظ الرحلة بنجاح');
+        } else {
+          Alert.alert('حدث خطأ أثناء حفظ الرحلة');
+        }
+      } catch (error) {
+        console.error('Error saving trip:', error);
+        Alert.alert('حدث خطأ أثناء حفظ الرحلة');
+      } finally {
+        setSaving(false);
+      }
+    }
   };
 
   // Mock analysis data
@@ -48,8 +72,16 @@ export default function FareResults() {
               value={inputValue}
               onChangeText={setInputValue}
             />
-            <TouchableOpacity style={styles.paidInputButton} onPress={handlePaidFareSubmit}>
-              <Text style={styles.paidInputButtonText}>تأكيد</Text>
+            <TouchableOpacity 
+              style={styles.paidInputButton} 
+              onPress={handlePaidFareSubmit}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.paidInputButtonText}>تأكيد</Text>
+              )}
             </TouchableOpacity>
           </View>
         )}

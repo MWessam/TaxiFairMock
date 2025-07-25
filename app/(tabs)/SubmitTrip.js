@@ -1,13 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, ScrollView, ActivityIndicator } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, ActivityIndicator, Platform, KeyboardAvoidingView, Dimensions } from 'react-native';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import MapView, { Marker, Polyline } from 'react-native-maps';
+import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { getRouteDistanceORS, getGovernorateFromCoords } from '../../routeHelpers';
 import { saveTrip } from '../../firestoreHelpers';
+import { useTheme } from '@/constants/ThemeContext';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 
-export default function SubmitTrip() {
+const { width, height } = Dimensions.get('window');
+
+export default function TripForm({ mode = 'submit' }) {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { theme } = useTheme();
   const [from, setFrom] = useState({ address: '', lat: null, lng: null });
   const [to, setTo] = useState({ address: '', lat: null, lng: null });
   const [fare, setFare] = useState('');
@@ -16,6 +24,30 @@ export default function SubmitTrip() {
   const [startTime, setStartTime] = useState(null);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [routeCoords, setRouteCoords] = useState([]);
+  const [isScreenFocused, setIsScreenFocused] = useState(true);
+  const bottomSheetRef = useRef(null);
+  const snapPoints = useMemo(() => ['40%', '90%'], []);
+
+  const isEstimateMode = mode === 'estimate';
+
+  // Handle screen focus/blur to manage bottom sheet behavior
+  useFocusEffect(
+    React.useCallback(() => {
+      setIsScreenFocused(true);
+      // Re-enable bottom sheet when screen comes back into focus
+      if (bottomSheetRef.current) {
+        bottomSheetRef.current.snapToIndex(0);
+      }
+      return () => {
+        setIsScreenFocused(false);
+        // Close bottom sheet when leaving screen
+        if (bottomSheetRef.current) {
+          bottomSheetRef.current.close();
+        }
+      };
+    }, [])
+  );
 
   // Update from/to if coming back from PlacePicker
   useEffect(() => {
@@ -27,211 +59,389 @@ export default function SubmitTrip() {
     }
   }, [params.from_name, params.from_lat, params.from_lng, params.to_name, params.to_lat, params.to_lng]);
 
+  // Fetch route polyline if both from and to are set
+  useEffect(() => {
+    async function fetchRoute() {
+      if (from.lat && from.lng && to.lat && to.lng) {
+        try {
+          // Use getRouteDistanceORS to get route geometry
+          const routeData = await getRouteDistanceORS(
+            { lat: from.lat, lng: from.lng, name: from.address },
+            { lat: to.lat, lng: to.lng, name: to.address },
+            true // pass true to get geometry
+          );
+          if (routeData && routeData.geometry && routeData.geometry.length > 0) {
+            setRouteCoords(routeData.geometry);
+          } else {
+            setRouteCoords([]);
+          }
+        } catch (error) {
+          console.error('Error fetching route:', error);
+          setRouteCoords([]);
+        }
+      } else {
+        setRouteCoords([]);
+      }
+    }
+    fetchRoute();
+  }, [from, to]);
+
+  // Auto-expand sheet if both locations are filled and screen is focused
+  useEffect(() => {
+    if (from.lat && to.lat && bottomSheetRef.current && isScreenFocused) {
+      bottomSheetRef.current.expand();
+    }
+  }, [from, to, isScreenFocused]);
+
   const handleSubmit = async () => {
-    if (!from.address || !to.address || !fare) {
-      Alert.alert('يرجى اختيار نقطة البداية والنهاية وكتابة الأجرة المدفوعة');
+    // Validation based on mode
+    if (!from.address || !to.address) {
+      Alert.alert('يرجى اختيار نقطة البداية والنهاية');
       return;
     }
+    
+    if (!isEstimateMode && !fare) {
+      Alert.alert('يرجى كتابة الأجرة المدفوعة');
+      return;
+    }
+
     setLoading(true);
     try {
       const fromObj = { lat: from.lat, lng: from.lng, name: from.address };
       const toObj = { lat: to.lat, lng: to.lng, name: to.address };
-      const distance = await getRouteDistanceORS(fromObj, toObj);
+      const routeData = await getRouteDistanceORS(fromObj, toObj, false); // Get distance only
+      const distance = typeof routeData === 'number' ? routeData : routeData?.distance;
       const governorate = await getGovernorateFromCoords(fromObj.lat, fromObj.lng);
-      const tripData = {
-        from: fromObj,
-        to: toObj,
-        fare: Number(fare),
-        start_time: startTime ? startTime.toISOString() : null,
-        created_at: new Date().toISOString(),
-        duration: duration ? Number(duration) : null,
-        passenger_count: passengers ? Number(passengers) : 1,
-        governorate,
-        distance,
-      };
-      const success = await saveTrip(tripData);
-      setLoading(false);
-      if (success) {
-        Alert.alert('تم حفظ الرحلة بنجاح');
-        setFrom({ address: '', lat: null, lng: null });
-        setTo({ address: '', lat: null, lng: null });
-        setFare('');
-        setDuration('');
-        setPassengers('');
-        setStartTime(null);
-      } else {
-        Alert.alert('حدث خطأ أثناء حفظ الرحلة');
+      
+      // Mock estimate for now
+      const estimate = 38;
+      
+      // If in submit mode, save trip data directly to Firebase
+      if (!isEstimateMode) {
+        const tripData = {
+          from: fromObj,
+          to: toObj,
+          fare: Number(fare),
+          start_time: startTime ? startTime.toISOString() : null,
+          created_at: new Date().toISOString(),
+          duration: duration ? Number(duration) : null,
+          passenger_count: passengers ? Number(passengers) : 1,
+          governorate,
+          distance,
+        };
+        
+        const success = await saveTrip(tripData);
+        if (!success) {
+          setLoading(false);
+          Alert.alert('حدث خطأ أثناء حفظ الرحلة');
+          return;
+        }
       }
+      
+      setLoading(false);
+      
+      // Navigate to FareResults with appropriate data
+      router.push({
+        pathname: '/(tabs)/FareResults',
+        params: {
+          from: from.address,
+          to: to.address,
+          time: startTime ? startTime.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : null,
+          duration,
+          passengers,
+          estimate,
+          distance,
+          governorate,
+          // If in submit mode and fare is provided, pass it
+          ...(fare && { paidFare: fare }),
+          // Pass mode to FareResults
+          mode,
+          // Pass trip data for potential saving later (only in estimate mode)
+          ...(isEstimateMode && {
+            tripData: JSON.stringify({
+              from: fromObj,
+              to: toObj,
+              fare: null, // Will be set when user enters paid fare
+              start_time: startTime ? startTime.toISOString() : null,
+              created_at: new Date().toISOString(),
+              duration: duration ? Number(duration) : null,
+              passenger_count: passengers ? Number(passengers) : 1,
+              governorate,
+              distance,
+            })
+          })
+        },
+      });
     } catch (err) {
       setLoading(false);
-      Alert.alert('حدث خطأ أثناء حساب المسافة أو حفظ الرحلة');
+      Alert.alert('حدث خطأ أثناء حساب المسافة أو التقدير');
     }
   };
 
+  // Center map between from and to
+  const getMapRegion = () => {
+    if (from.lat && from.lng && to.lat && to.lng) {
+      const midLat = (from.lat + to.lat) / 2;
+      const midLng = (from.lng + to.lng) / 2;
+      return {
+        latitude: midLat,
+        longitude: midLng,
+        latitudeDelta: Math.abs(from.lat - to.lat) * 2.5 + 0.03,
+        longitudeDelta: Math.abs(from.lng - to.lng) * 2.5 + 0.03,
+      };
+    } else if (from.lat && from.lng) {
+      return {
+        latitude: from.lat,
+        longitude: from.lng,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      };
+    } else {
+      return {
+        latitude: 30.0444,
+        longitude: 31.2357,
+        latitudeDelta: 0.08,
+        longitudeDelta: 0.08,
+      };
+    }
+  };
+
+  const handleNavigateToPlacePicker = (type) => {
+    // Close bottom sheet before navigation
+    if (bottomSheetRef.current) {
+      bottomSheetRef.current.close();
+    }
+    
+    // Small delay to ensure bottom sheet is closed
+    setTimeout(() => {
+      const coords = type === 'from' ? { lat: from.lat, lng: from.lng } : { lat: to.lat, lng: to.lng };
+      const returnTo = isEstimateMode ? '/(tabs)/EstimateFare' : '/(tabs)/SubmitTrip';
+      router.push({ 
+        pathname: '/(tabs)/PlacePicker', 
+        params: { 
+          type, 
+          lat: coords.lat, 
+          lng: coords.lng, 
+          returnTo 
+        } 
+      });
+    }, 100);
+  };
+
+  const styles = createStyles(theme);
+
+  // Only render bottom sheet if screen is focused
+  if (!isScreenFocused) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.background }}>
+        <MapView
+          style={StyleSheet.absoluteFill}
+          initialRegion={getMapRegion()}
+          region={getMapRegion()}
+        >
+          {from.lat && from.lng && (
+            <Marker coordinate={{ latitude: from.lat, longitude: from.lng }} title={from.address || 'من'} pinColor={theme.primary} />
+          )}
+          {to.lat && to.lng && (
+            <Marker coordinate={{ latitude: to.lat, longitude: to.lng }} title={to.address || 'إلى'} pinColor={theme.accent} />
+          )}
+          {routeCoords.length > 0 && (
+            <Polyline coordinates={routeCoords} strokeColor={theme.primary} strokeWidth={4} />
+          )}
+        </MapView>
+      </View>
+    );
+  }
+
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.container}>
-          <Text style={styles.title}>شارك اجرة رحلتك</Text>
-          <View style={styles.locationBoxes}>
-            <TouchableOpacity
-              style={styles.locationBox}
-              onPress={() => router.push({ pathname: '/(tabs)/PlacePicker', params: { type: 'from', lat: from.lat, lng: from.lng, returnTo: '/(tabs)/SubmitTrip' } })}
-            >
-              <View style={styles.locationIcon}><Text style={styles.locationIconText}>🔵</Text></View>
-              <View style={styles.locationContent}>
-                <Text style={styles.locationLabel}>من</Text>
-                <Text style={styles.locationAddress}>{from.address || 'اختر نقطة البداية'}</Text>
-              </View>
-            </TouchableOpacity>
-            <View style={styles.connectingLine} />
-            <TouchableOpacity
-              style={styles.locationBox}
-              onPress={() => router.push({ pathname: '/(tabs)/PlacePicker', params: { type: 'to', lat: to.lat, lng: to.lng, returnTo: '/(tabs)/SubmitTrip' } })}
-            >
-              <View style={styles.locationIcon}><Text style={styles.locationIconText}>🔴</Text></View>
-              <View style={styles.locationContent}>
-                <Text style={styles.locationLabel}>إلى</Text>
-                <Text style={styles.locationAddress}>{to.address || 'اختر نقطة النهاية'}</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.form}>
-            <TouchableOpacity
-              style={styles.input}
-              onPress={() => setShowTimePicker(true)}
-              activeOpacity={0.7}
-            >
-              <Text style={{ color: startTime ? '#222' : '#999', fontSize: 16 }}>
-                {startTime ? startTime.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : 'وقت بداية الرحلة (اختياري)'}
-              </Text>
-            </TouchableOpacity>
-            {showTimePicker && (
-              <DateTimePicker
-                value={startTime || new Date()}
-                mode="time"
-                is24Hour={true}
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(event, selectedDate) => {
-                  setShowTimePicker(false);
-                  if (selectedDate) setStartTime(selectedDate);
-                }}
-              />
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <BottomSheetModalProvider>
+        <View style={{ flex: 1, backgroundColor: theme.background }}>
+          <MapView
+            style={StyleSheet.absoluteFill}
+            initialRegion={getMapRegion()}
+            region={getMapRegion()}
+          >
+            {from.lat && from.lng && (
+              <Marker coordinate={{ latitude: from.lat, longitude: from.lng }} title={from.address || 'من'} pinColor={theme.primary} />
             )}
-            <TextInput
-              style={styles.input}
-              placeholder="الأجرة المدفوعة (جنيه) *"
-              keyboardType="numeric"
-              value={fare}
-              onChangeText={setFare}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="مدة الرحلة (دقائق) (اختياري)"
-              keyboardType="numeric"
-              value={duration}
-              onChangeText={setDuration}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="عدد الركاب (اختياري)"
-              keyboardType="numeric"
-              value={passengers}
-              onChangeText={setPassengers}
-            />
-            <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} disabled={loading}>
-              <Text style={styles.submitButtonText}>حفظ الرحلة</Text>
-            </TouchableOpacity>
-            {loading && (
-              <View style={{ alignItems: 'center', marginVertical: 10 }}>
-                <ActivityIndicator size="large" color="#d32f2f" />
-                <Text style={{ color: '#d32f2f', marginTop: 8 }}>جاري الحفظ...</Text>
-              </View>
+            {to.lat && to.lng && (
+              <Marker coordinate={{ latitude: to.lat, longitude: to.lng }} title={to.address || 'إلى'} pinColor={theme.accent} />
             )}
-          </View>
+            {routeCoords.length > 0 && (
+              <Polyline coordinates={routeCoords} strokeColor={theme.primary} strokeWidth={4} />
+            )}
+          </MapView>
+          <BottomSheet
+            ref={bottomSheetRef}
+            index={0}
+            snapPoints={snapPoints}
+            enablePanDownToClose={false}
+            backgroundStyle={{ backgroundColor: theme.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}
+            handleIndicatorStyle={{ backgroundColor: theme.border }}
+            activeOffsetY={[-1, 1]}
+            failOffsetX={[-5, 5]}
+          >
+            <BottomSheetView>
+              <View style={styles.sheetContent}>
+                <Text style={styles.sheetTitle}>
+                  {isEstimateMode ? 'احسب اجرة رحلتك' : 'شارك اجرة رحلتك'}
+                </Text>
+                <View style={styles.sheetFieldsRow}>
+                  <TouchableOpacity
+                    style={styles.sheetField}
+                    onPress={() => handleNavigateToPlacePicker('from')}
+                  >
+                    <Text style={styles.sheetFieldLabel}>من</Text>
+                    <Text style={styles.sheetFieldValue}>{from.address || 'اختر نقطة البداية'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.sheetField}
+                    onPress={() => handleNavigateToPlacePicker('to')}
+                  >
+                    <Text style={styles.sheetFieldLabel}>إلى</Text>
+                    <Text style={styles.sheetFieldValue}>{to.address || 'اختر نقطة النهاية'}</Text>
+                  </TouchableOpacity>
+                </View>
+                {/* Expanded content */}
+                {(from.lat && to.lat) && (
+                  <View style={styles.sheetExpandedContent}>
+                    <TouchableOpacity
+                      style={styles.input}
+                      onPress={() => setShowTimePicker(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={{ color: startTime ? theme.text : theme.textSecondary, fontSize: 16 }}>
+                        {startTime ? startTime.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : 'وقت بداية الرحلة (اختياري)'}
+                      </Text>
+                    </TouchableOpacity>
+                    {showTimePicker && (
+                      <DateTimePicker
+                        value={startTime || new Date()}
+                        mode="time"
+                        is24Hour={true}
+                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                        onChange={(event, selectedDate) => {
+                          setShowTimePicker(false);
+                          if (selectedDate) setStartTime(selectedDate);
+                        }}
+                      />
+                    )}
+                    {/* Only show fare input in submit mode */}
+                    {!isEstimateMode && (
+                      <TextInput
+                        style={styles.input}
+                        placeholder="الأجرة المدفوعة (جنيه) *"
+                        keyboardType="numeric"
+                        value={fare}
+                        onChangeText={setFare}
+                        placeholderTextColor={theme.textSecondary}
+                      />
+                    )}
+                    <TextInput
+                      style={styles.input}
+                      placeholder="مدة الرحلة (دقائق) (اختياري)"
+                      keyboardType="numeric"
+                      value={duration}
+                      onChangeText={setDuration}
+                      placeholderTextColor={theme.textSecondary}
+                    />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="عدد الركاب (اختياري)"
+                      keyboardType="numeric"
+                      value={passengers}
+                      onChangeText={setPassengers}
+                      placeholderTextColor={theme.textSecondary}
+                    />
+                    <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} disabled={loading} activeOpacity={0.85}>
+                      <Text style={styles.submitButtonText}>
+                        {isEstimateMode ? 'احسب الأجرة' : 'حفظ الرحلة'}
+                      </Text>
+                    </TouchableOpacity>
+                    {loading && (
+                      <View style={{ alignItems: 'center', marginVertical: 10 }}>
+                        <ActivityIndicator size="large" color={theme.primary} />
+                        <Text style={{ color: theme.primary, marginTop: 8 }}>
+                          {isEstimateMode ? 'جاري الحساب...' : 'جاري الحفظ...'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </View>
+            </BottomSheetView>
+          </BottomSheet>
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </BottomSheetModalProvider>
+    </GestureHandlerRootView>
   );
 }
 
-const styles = StyleSheet.create({
-  scrollContainer: {
-    flexGrow: 1,
-    backgroundColor: '#fff',
+const createStyles = (theme) => StyleSheet.create({
+  sheetContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
   },
-  container: {
-    flex: 1,
-    padding: 20,
-    justifyContent: 'flex-start',
-  },
-  title: {
-    fontSize: 24,
+  sheetTitle: {
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#d32f2f',
-    marginBottom: 24,
+    color: theme.primary,
+    marginBottom: 18,
     textAlign: 'center',
   },
-  locationBoxes: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 24,
+  sheetFieldsRow: {
+    flexDirection: 'column',
+    gap: 12,
+    marginBottom: 12,
   },
-  locationBox: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 56,
+  sheetField: {
+    backgroundColor: theme.background,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
-  locationIcon: {
-    marginRight: 10,
-  },
-  locationIconText: {
-    fontSize: 20,
-  },
-  locationContent: {
-    flex: 1,
-  },
-  locationLabel: {
+  sheetFieldLabel: {
     fontSize: 14,
-    color: '#888',
+    color: theme.textSecondary,
     marginBottom: 2,
   },
-  locationAddress: {
+  sheetFieldValue: {
     fontSize: 16,
-    color: '#222',
+    color: theme.text,
   },
-  connectingLine: {
-    width: 16,
-    height: 2,
-    backgroundColor: '#d32f2f',
-    marginHorizontal: 8,
-    borderRadius: 1,
-  },
-  form: {
-    marginTop: 8,
+  sheetExpandedContent: {
+    marginTop: 10,
   },
   input: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 10,
-    padding: 14,
+    backgroundColor: theme.surface,
+    borderRadius: 12,
+    padding: 16,
     fontSize: 16,
-    marginBottom: 14,
-    color: '#222',
+    marginBottom: 16,
+    color: theme.text,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
   submitButton: {
-    backgroundColor: '#d32f2f',
-    borderRadius: 10,
-    paddingVertical: 14,
+    backgroundColor: theme.primary,
+    borderRadius: 32,
+    paddingVertical: 18,
     alignItems: 'center',
     marginTop: 8,
+    shadowColor: theme.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
   },
   submitButtonText: {
-    color: '#fff',
-    fontSize: 18,
+    color: theme.textOnPrimary,
+    fontSize: 20,
     fontWeight: 'bold',
+    letterSpacing: 1,
   },
-}); 
+});

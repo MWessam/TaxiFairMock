@@ -1,34 +1,70 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Keyboard, Dimensions } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Modal, Dimensions } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT, UrlTile } from 'react-native-maps';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import * as Location from 'expo-location';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 export default function PlacePicker() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const [fromQuery, setFromQuery] = useState('');
-  const [toQuery, setToQuery] = useState('');
-  const [activeField, setActiveField] = useState(params.type || 'from');
+  const [from, setFrom] = useState({ name: '', lat: null, lng: null });
+  const [to, setTo] = useState({ name: '', lat: null, lng: null });
+  const [activeField, setActiveField] = useState('from');
+  const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [showMap, setShowMap] = useState(false);
   const [mapPin, setMapPin] = useState({ latitude: 30.0444, longitude: 31.2357 });
   const [pinAddress, setPinAddress] = useState('');
-  const [fromLocation, setFromLocation] = useState(null);
-  const [toLocation, setToLocation] = useState(null);
+  const [currentLocation, setCurrentLocation] = useState(null);
   const debounceRef = useRef();
 
+  // Get current location on component mount
   useEffect(() => {
-    if (activeField === 'from' && fromQuery.length > 2) {
-      debouncedSearch(fromQuery);
-    } else if (activeField === 'to' && toQuery.length > 2) {
-      debouncedSearch(toQuery);
-    } else {
-      setResults([]);
-    }
-  }, [fromQuery, toQuery, activeField]);
+    getCurrentLocation();
+  }, []);
 
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Location permission denied');
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = location.coords;
+      setCurrentLocation({ latitude, longitude });
+      
+      // Update map pin to current location if it's still default
+      if (mapPin.latitude === 30.0444 && mapPin.longitude === 31.2357) {
+        setMapPin({ latitude, longitude });
+      }
+    } catch (error) {
+      console.log('Error getting location:', error);
+    }
+  };
+
+  // Calculate viewbox coordinates (5km radius)
+  const getViewbox = () => {
+    if (!currentLocation) return null;
+    
+    // 5km in degrees (approximate)
+    const latDelta = 5 / 111; // 1 degree ≈ 111km
+    const lngDelta = 5 / (111 * Math.cos(currentLocation.latitude * Math.PI / 180));
+    
+    const minLat = currentLocation.latitude - latDelta;
+    const maxLat = currentLocation.latitude + latDelta;
+    const minLng = currentLocation.longitude - lngDelta;
+    const maxLng = currentLocation.longitude + lngDelta;
+    
+    return `${minLng},${minLat},${maxLng},${maxLat}`;
+  };
+
+  // Search locations
   const debouncedSearch = (query) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => searchPlaces(query), 400);
@@ -37,11 +73,16 @@ export default function PlacePicker() {
   const searchPlaces = async (query) => {
     setLoading(true);
     try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5&accept-language=ar,en&countrycodes=eg`;
+      const viewbox = getViewbox();
+      let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5&accept-language=ar,en`;
+      
+      // Add viewbox if we have current location
+      if (viewbox) {
+        url += `&viewbox=${viewbox}&bounded=0`;
+      }
+      
       const res = await fetch(url, {
-        headers: {
-          'User-Agent': 'TaxiFairApp/1.0',
-        },
+        headers: { 'User-Agent': 'TaxiFairApp/1.0' },
       });
       const data = await res.json();
       setResults(data);
@@ -51,82 +92,123 @@ export default function PlacePicker() {
     setLoading(false);
   };
 
-  const handleSelect = (item) => {
-    const loc = {
-      latitude: parseFloat(item.lat),
-      longitude: parseFloat(item.lon),
-      display_name: item.display_name,
-    };
-    if (activeField === 'from') {
-      setFromQuery(item.display_name);
-      setFromLocation(loc);
-      setMapPin({ latitude: loc.latitude, longitude: loc.longitude });
-      setActiveField('to');
+  // Handle text input change
+  const handleInputChange = (field, value) => {
+    setSearch(value);
+    setActiveField(field);
+    
+    // Update the corresponding field state
+    if (field === 'from') {
+      setFrom(prev => ({ ...prev, name: value }));
     } else {
-      setToQuery(item.display_name);
-      setToLocation(loc);
-      router.back();
-      setTimeout(() => {
-        router.replace({
-          pathname: params.returnTo || '/(tabs)/SubmitTrip',
-          params: {
-            from_lat: fromLocation?.latitude,
-            from_lng: fromLocation?.longitude,
-            from_name: fromQuery,
-            to_lat: toLocation?.latitude,
-            to_lng: toLocation?.longitude,
-            to_name: toLocation?.display_name,
-          },
-        });
-      }, 100);
+      setTo(prev => ({ ...prev, name: value }));
     }
+    
+    debouncedSearch(value);
   };
 
-  const handleMapSelection = async () => {
-    setLoading(true);
-    try {
-      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${mapPin.latitude}&lon=${mapPin.longitude}&zoom=16&addressdetails=1`;
-      const res = await fetch(url, {
-        headers: {
-          'User-Agent': 'TaxiFairApp/1.0',
-          'Accept-Language': 'ar,en',
-        },
-      });
-      const data = await res.json();
-      setPinAddress(data.display_name || '');
-      
-      const currentLocation = {
-        latitude: mapPin.latitude,
-        longitude: mapPin.longitude,
-        display_name: data.display_name || '',
-      };
-      
-      if (activeField === 'from') {
-        setFromQuery(data.display_name || '');
-        setFromLocation(currentLocation);
-        setActiveField('to');
-      } else {
-        setToQuery(data.display_name || '');
-        setToLocation(currentLocation);
+  // Handle selecting a location from the list
+  const handleSelect = (item) => {
+    const loc = {
+      name: item.display_name,
+      lat: parseFloat(item.lat),
+      lng: parseFloat(item.lon),
+    };
+    if (activeField === 'from') {
+      setFrom(loc);
+    } else {
+      setTo(loc);
+    }
+    setSearch('');
+    setResults([]);
+    // If both fields are filled, return
+    setTimeout(() => {
+      if (from.name && to.name) {
         router.back();
         setTimeout(() => {
           router.replace({
             pathname: params.returnTo || '/(tabs)/SubmitTrip',
             params: {
-              from_lat: fromLocation?.latitude,
-              from_lng: fromLocation?.longitude,
-              from_name: fromQuery,
-              to_lat: currentLocation.latitude,
-              to_lng: currentLocation.longitude,
-              to_name: currentLocation.display_name,
+              from_lat: activeField === 'from' ? loc.lat : from.lat,
+              from_lng: activeField === 'from' ? loc.lng : from.lng,
+              from_name: activeField === 'from' ? loc.name : from.name,
+              to_lat: activeField === 'to' ? loc.lat : to.lat,
+              to_lng: activeField === 'to' ? loc.lng : to.lng,
+              to_name: activeField === 'to' ? loc.name : to.name,
             },
           });
         }, 100);
       }
+    }, 100);
+  };
+
+  // Map logic
+  const openMap = (field) => {
+    setActiveField(field);
+    setShowMap(true);
+    setPinAddress('');
+  };
+
+  const handleMapRegionChange = (region) => {
+    setMapPin({ latitude: region.latitude, longitude: region.longitude });
+  };
+
+  const handleMapPinDragEnd = (e) => {
+    setMapPin(e.nativeEvent.coordinate);
+  };
+
+  const reverseGeocode = async () => {
+    setPinAddress('');
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${mapPin.latitude}&lon=${mapPin.longitude}&zoom=16&addressdetails=1`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'TaxiFairApp/1.0', 'Accept-Language': 'ar,en' },
+      });
+      const data = await res.json();
+      setPinAddress(data.display_name || '');
     } catch (err) {
       setPinAddress('');
     }
-    setLoading(false);
+  };
+
+  // When map pin moves, reverse geocode
+  React.useEffect(() => {
+    if (showMap) reverseGeocode();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapPin.latitude, mapPin.longitude, showMap]);
+
+  // Handle picking from map
+  const handlePickFromMap = () => {
+    const loc = {
+      name: pinAddress,
+      lat: mapPin.latitude,
+      lng: mapPin.longitude,
+    };
+    if (activeField === 'from') {
+      setFrom(loc);
+    } else {
+      setTo(loc);
+    }
+    setShowMap(false);
+    // If both fields are filled, return
+    setTimeout(() => {
+      if ((activeField === 'from' ? loc.name : from.name) && (activeField === 'to' ? loc.name : to.name)) {
+        router.back();
+        setTimeout(() => {
+          router.replace({
+            pathname: params.returnTo || '/(tabs)/SubmitTrip',
+            params: {
+              from_lat: activeField === 'from' ? loc.lat : from.lat,
+              from_lng: activeField === 'from' ? loc.lng : from.lng,
+              from_name: activeField === 'from' ? loc.name : from.name,
+              to_lat: activeField === 'to' ? loc.lat : to.lat,
+              to_lng: activeField === 'to' ? loc.lng : to.lng,
+              to_name: activeField === 'to' ? loc.name : to.name,
+            },
+          });
+        }, 100);
+      }
+    }, 100);
   };
 
   return (
@@ -134,18 +216,21 @@ export default function PlacePicker() {
       <View style={styles.inputPanel}>
         <TextInput
           style={[styles.input, activeField === 'from' && styles.activeInput]}
-          placeholder="من (اكتب أو اختر من الخريطة)"
-          value={fromQuery}
-          onChangeText={setFromQuery}
+          placeholder="من (اكتب اسم المكان أو اختر من الخريطة)"
+          value={from.name}
           onFocus={() => setActiveField('from')}
+          onChangeText={v => handleInputChange('from', v)}
         />
         <TextInput
           style={[styles.input, activeField === 'to' && styles.activeInput]}
-          placeholder="إلى (اكتب أو اختر من الخريطة)"
-          value={toQuery}
-          onChangeText={setToQuery}
+          placeholder="إلى (اكتب اسم المكان أو اختر من الخريطة)"
+          value={to.name}
           onFocus={() => setActiveField('to')}
+          onChangeText={v => handleInputChange('to', v)}
         />
+        <TouchableOpacity style={styles.mapButton} onPress={() => openMap(activeField)}>
+          <Text style={styles.mapButtonText}>اختر من الخريطة</Text>
+        </TouchableOpacity>
       </View>
       {loading && <ActivityIndicator size="large" color="#d32f2f" style={{ margin: 12 }} />}
       <FlatList
@@ -158,52 +243,74 @@ export default function PlacePicker() {
         )}
         style={{ maxHeight: 180 }}
       />
-      <MapView
-        style={{ flex: 1, minHeight: SCREEN_HEIGHT * 0.4 }}
-        provider={PROVIDER_DEFAULT}
-        initialRegion={{
-          latitude: mapPin.latitude,
-          longitude: mapPin.longitude,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
-        }}
-        onPress={e => setMapPin(e.nativeEvent.coordinate)}
-        onRegionChangeComplete={region => setMapPin({ latitude: region.latitude, longitude: region.longitude })}
-      >
-        <Marker coordinate={mapPin} draggable onDragEnd={e => setMapPin(e.nativeEvent.coordinate)} />
-        <UrlTile
-          urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          maximumZ={19}
-          flipY={false}
-        />
-      </MapView>
-      <TouchableOpacity style={styles.mapButton} onPress={handleMapSelection}>
-        <Text style={styles.mapButtonText}>اختر هذه النقطة</Text>
-      </TouchableOpacity>
-      {pinAddress ? <Text style={styles.pinAddress}>{pinAddress}</Text> : null}
+      <Modal visible={showMap} animationType="slide">
+        <View style={{ flex: 1, backgroundColor: '#fff' }}>
+          <MapView
+            style={{ flex: 1, minHeight: SCREEN_HEIGHT * 0.4 }}
+            provider={PROVIDER_DEFAULT}
+            initialRegion={{
+              latitude: mapPin.latitude,
+              longitude: mapPin.longitude,
+              latitudeDelta: 0.05,
+              longitudeDelta: 0.05,
+            }}
+            onRegionChangeComplete={handleMapRegionChange}
+          >
+            <Marker
+              coordinate={mapPin}
+              draggable
+              onDragEnd={handleMapPinDragEnd}
+            />
+            <UrlTile
+              urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              maximumZ={19}
+              flipY={false}
+            />
+          </MapView>
+          <View style={styles.mapPanel}>
+            <Text style={styles.pinAddress}>{pinAddress || 'جاري جلب العنوان...'}</Text>
+            <TouchableOpacity style={styles.pickButton} onPress={handlePickFromMap}>
+              <Text style={styles.pickButtonText}>اختر هذه النقطة</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelButton} onPress={() => setShowMap(false)}>
+              <Text style={styles.cancelButtonText}>إلغاء</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   inputPanel: {
-    flexDirection: 'row',
-    padding: 12,
+    padding: 16,
     backgroundColor: '#fff',
     zIndex: 2,
   },
   input: {
-    flex: 1,
     backgroundColor: '#f5f5f5',
     borderRadius: 10,
     padding: 12,
     fontSize: 16,
-    marginHorizontal: 4,
+    marginBottom: 10,
     color: '#222',
   },
   activeInput: {
     borderColor: '#d32f2f',
     borderWidth: 2,
+  },
+  mapButton: {
+    backgroundColor: '#d32f2f',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  mapButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   resultItem: {
     padding: 12,
@@ -215,21 +322,40 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#222',
   },
-  mapButton: {
-    backgroundColor: '#d32f2f',
-    borderRadius: 10,
-    paddingVertical: 12,
+  mapPanel: {
+    padding: 16,
+    backgroundColor: '#fff',
     alignItems: 'center',
-    margin: 12,
-  },
-  mapButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   pinAddress: {
     textAlign: 'center',
     color: '#222',
-    marginBottom: 8,
+    marginBottom: 12,
+    fontSize: 16,
   },
-}); 
+  pickButton: {
+    backgroundColor: '#d32f2f',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  pickButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  cancelButton: {
+    backgroundColor: '#eee',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#d32f2f',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+});

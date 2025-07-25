@@ -2,19 +2,30 @@
 // Helper functions for route distance calculations and geocoding
 
 // Calculates driving distance between two points using OpenRouteService
-export async function getRouteDistanceORS(start, end) {
+export async function getRouteDistanceORS(start, end, getGeometry = false) {
   const apiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImRkZGE0M2MyYWVmNDRkYzFiYWRmMzMyN2IzMzhmMzMxIiwiaCI6Im11cm11cjY0In0='; // <-- Replace with your real key!
   const url = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${apiKey}&start=${start.lng},${start.lat}&end=${end.lng},${end.lat}`;
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error('ORS API error');
     const data = await res.json();
-    // Distance in meters
-    const distanceKm = data.features[0].properties.summary.distance / 1000;
-    return distanceKm;
+    
+    if (getGeometry) {
+      // Return both distance and geometry
+      const distanceKm = data.features[0].properties.summary.distance / 1000;
+      const geometry = data.features[0].geometry.coordinates.map(coord => ({
+        latitude: coord[1],
+        longitude: coord[0]
+      }));
+      return { distance: distanceKm, geometry };
+    } else {
+      // Return only distance (backward compatibility)
+      const distanceKm = data.features[0].properties.summary.distance / 1000;
+      return distanceKm;
+    }
   } catch (err) {
     console.error('Error fetching route distance:', err);
-    return null;
+    return getGeometry ? { distance: null, geometry: [] } : null;
   }
 }
 
