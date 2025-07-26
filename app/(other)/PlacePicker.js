@@ -213,6 +213,15 @@ export default function PlacePicker() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }}>
+      {/* Header with back button */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backButtonText}>←</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>اختر المواقع</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
       <View style={styles.inputPanel}>
         <TextInput
           style={[styles.input, activeField === 'from' && styles.activeInput]}
@@ -243,10 +252,16 @@ export default function PlacePicker() {
         )}
         style={{ maxHeight: 180 }}
       />
-      <Modal visible={showMap} animationType="slide">
-        <View style={{ flex: 1, backgroundColor: '#fff' }}>
+      {/* Map Modal */}
+      <Modal 
+        visible={showMap} 
+        animationType="slide"
+        presentationStyle="fullScreen"
+        statusBarTranslucent={true}
+      >
+        <View style={styles.mapContainer}>
           <MapView
-            style={{ flex: 1, minHeight: SCREEN_HEIGHT * 0.4 }}
+            style={styles.map}
             provider={PROVIDER_DEFAULT}
             initialRegion={{
               latitude: mapPin.latitude,
@@ -255,6 +270,7 @@ export default function PlacePicker() {
               longitudeDelta: 0.05,
             }}
             onRegionChangeComplete={handleMapRegionChange}
+            mapType="standard"
           >
             <Marker
               coordinate={mapPin}
@@ -267,13 +283,19 @@ export default function PlacePicker() {
               flipY={false}
             />
           </MapView>
-          <View style={styles.mapPanel}>
-            <Text style={styles.pinAddress}>{pinAddress || 'جاري جلب العنوان...'}</Text>
-            <TouchableOpacity style={styles.pickButton} onPress={handlePickFromMap}>
-              <Text style={styles.pickButtonText}>اختر هذه النقطة</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelButton} onPress={() => setShowMap(false)}>
-              <Text style={styles.cancelButtonText}>إلغاء</Text>
+          
+          {/* Back Button */}
+          <TouchableOpacity style={styles.mapBackButton} onPress={() => setShowMap(false)}>
+            <Text style={styles.mapBackButtonText}>←</Text>
+          </TouchableOpacity>
+
+          {/* Map Bottom Panel */}
+          <View style={styles.mapBottomPanel}>
+            <Text style={styles.pinAddress} numberOfLines={2}>
+              {pinAddress || 'جاري جلب العنوان...'}
+            </Text>
+            <TouchableOpacity style={styles.doneButton} onPress={handlePickFromMap}>
+              <Text style={styles.doneButtonText}>تم</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -283,6 +305,34 @@ export default function PlacePicker() {
 }
 
 const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 50, // Add some top margin
+    paddingBottom: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  backButton: {
+    padding: 10,
+    marginRight: 10,
+  },
+  backButtonText: {
+    fontSize: 24,
+    color: '#222',
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#222',
+  },
+  headerSpacer: {
+    width: 40, // Adjust as needed for spacing
+  },
   inputPanel: {
     padding: 16,
     backgroundColor: '#fff',
@@ -355,6 +405,56 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     color: '#d32f2f',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  mapContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  map: {
+    flex: 1,
+  },
+  mapBackButton: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    zIndex: 10,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mapBackButtonText: {
+    color: '#fff',
+    fontSize: 24,
+  },
+  mapBottomPanel: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    padding: 16,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  doneButton: {
+    backgroundColor: '#d32f2f',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+  },
+  doneButtonText: {
+    color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
   },

@@ -17,42 +17,53 @@ export default function TabLayout() {
           borderTopWidth: 0,
           elevation: 0,
           shadowOpacity: 0,
+          height: 60,
+          paddingBottom: 8,
+          paddingTop: 8,
         },
         tabBarActiveTintColor: '#FFFFFF',
         tabBarInactiveTintColor: 'rgba(255, 255, 255, 0.7)',
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '600',
+          marginTop: 4,
+        },
+        tabBarIconStyle: {
+          marginBottom: 2,
         },
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'الرئيسية',
-          tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,
+          tabBarIcon: ({ color, focused }) => <TabBarIcon name="home" color={color} focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="SubmitTrip"
         options={{
           title: 'شارك رحلتك',
-          tabBarIcon: ({ color }) => <TabBarIcon name="car" color={color} />,
+          tabBarIcon: ({ color, focused }) => <TabBarIcon name="car" color={color} focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="TrackRide"
         options={{
           title: 'تتبع الرحلة',
-          tabBarIcon: ({ color }) => <TabBarIcon name="location" color={color} />,
+          tabBarIcon: ({ color, focused }) => <TabBarIcon name="location" color={color} focused={focused} />,
         }}
       />
     </Tabs>
   );
 }
 
-function TabBarIcon({ name, color }: { name: string; color: string }) {
+function TabBarIcon({ name, color, focused }: { name: string; color: string; focused?: boolean }) {
   return (
-    <Text style={{ fontSize: 20, color }}>
+    <Text style={{ 
+      fontSize: focused ? 24 : 20, 
+      color,
+      transform: [{ scale: focused ? 1.1 : 1 }],
+    }}>
       {name === 'home' && '🏠'}
       {name === 'car' && '🚗'}
       {name === 'location' && '📍'}

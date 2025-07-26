@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, Alert, Plat
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT, UrlTile } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { distillRoute, calculateRouteDistance, getGovernorateFromCoords } from '../../routeHelpers';
+import { distillRoute, calculateRouteDistance, getGovernorateFromCoords, getAddressFromCoords } from '../../routeHelpers';
 import { saveTrip } from '../../firestoreHelpers';
 
 export default function TrackRide() {
@@ -14,9 +14,11 @@ export default function TrackRide() {
   const [startAddress, setStartAddress] = useState('');
   const [endAddress, setEndAddress] = useState('');
   const [startTime, setStartTime] = useState(null);
-  const [duration, setDuration] = useState('');
+  const [endTime, setEndTime] = useState(null);
+  const [calculatedDuration, setCalculatedDuration] = useState('');
   const [passengers, setPassengers] = useState('');
   const [loading, setLoading] = useState(false);
+
   const watchId = useRef(null);
   const router = useRouter();
 
@@ -47,41 +49,87 @@ export default function TrackRide() {
       watchId.current.remove();
       watchId.current = null;
     }
+    
+    const endTimeNow = new Date();
+    setEndTime(endTimeNow);
+    
     if (route.length > 0) {
       setEndLoc(route[route.length - 1]);
     }
+    
     setLoading(true);
     try {
+      // Calculate duration in minutes
+      const durationMs = startTime ? endTimeNow.getTime() - startTime.getTime() : 0;
+      const durationMinutes = Math.round(durationMs / (1000 * 60));
+      setCalculatedDuration(durationMinutes.toString());
+      
+      // Get addresses for start and end locations
+      let startAddressName = '';
+      let endAddressName = '';
+      
+      if (startLoc) {
+        startAddressName = await getAddressFromCoords(startLoc.latitude, startLoc.longitude);
+        setStartAddress(startAddressName);
+      }
+      
+      if (route.length > 0) {
+        const endLocation = route[route.length - 1];
+        endAddressName = await getAddressFromCoords(endLocation.latitude, endLocation.longitude);
+        setEndAddress(endAddressName);
+      }
+      
       const distilledRoute = distillRoute(route, 20);
       const distance = calculateRouteDistance(route);
       const governorate = startLoc ? await getGovernorateFromCoords(startLoc.latitude, startLoc.longitude) : '';
-      const tripData = {
-        from: startLoc ? { lat: startLoc.latitude, lng: startLoc.longitude, name: startAddress } : {},
-        to: route.length > 0 ? { lat: route[route.length - 1].latitude, lng: route[route.length - 1].longitude, name: endAddress } : {},
+      
+      const tripDataObj = {
+        from: startLoc ? { lat: startLoc.latitude, lng: startLoc.longitude, name: startAddressName } : {},
+        to: route.length > 0 ? { lat: route[route.length - 1].latitude, lng: route[route.length - 1].longitude, name: endAddressName } : {},
         start_time: startTime ? startTime.toISOString() : null,
+        end_time: endTimeNow.toISOString(),
         created_at: new Date().toISOString(),
-        duration: duration ? Number(duration) : null,
+        duration: durationMinutes,
         passenger_count: passengers ? Number(passengers) : 1,
         governorate,
         route: distilledRoute,
         distance,
       };
-      const success = await saveTrip(tripData);
+      
       setLoading(false);
-      if (success) {
-        Alert.alert('تم حفظ الرحلة بنجاح');
-        setRoute([]);
-        setStartLoc(null);
-        setEndLoc(null);
-        setStartTime(null);
-        setDuration('');
-        setPassengers('');
-      } else {
-        Alert.alert('حدث خطأ أثناء حفظ الرحلة');
-      }
+      
+      // Navigate to FareResults with appropriate data (following SubmitTrip pattern)
+      router.push({
+        pathname: '/(other)/FareResults',
+        params: {
+          from: startAddressName,
+          to: endAddressName,
+          time: startTime ? startTime.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : null,
+          duration: durationMinutes.toString(),
+          passengers: passengers || '1',
+          estimate: '38', // Mock estimate like SubmitTrip
+          distance: distance.toFixed(2),
+          governorate,
+          mode: 'track', // Indicate this came from tracking
+          tripData: JSON.stringify({
+            from: startLoc ? { lat: startLoc.latitude, lng: startLoc.longitude, name: startAddressName } : {},
+            to: route.length > 0 ? { lat: route[route.length - 1].latitude, lng: route[route.length - 1].longitude, name: endAddressName } : {},
+            fare: null, // Will be set when user enters paid fare
+            start_time: startTime ? startTime.toISOString() : null,
+            end_time: endTimeNow.toISOString(),
+            created_at: new Date().toISOString(),
+            duration: durationMinutes,
+            passenger_count: passengers ? Number(passengers) : 1,
+            governorate,
+            route: distilledRoute,
+            distance,
+          })
+        }
+      });
     } catch (err) {
       setLoading(false);
-      Alert.alert('حدث خطأ أثناء حفظ الرحلة');
+      console.log(err);
+      Alert.alert('حدث خطأ أثناء معالجة الرحلة');
     }
   };
 
@@ -111,40 +159,33 @@ export default function TrackRide() {
           maximumZ={19}
           flipY={false}
         />
-      </MapView>
-      <View style={styles.bottomPanel}>
-        <Text style={styles.title}>ابدأ تتبع رحلتك</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="عدد الركاب (اختياري)"
-          keyboardType="numeric"
-          value={passengers}
-          onChangeText={setPassengers}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="مدة الرحلة (دقائق) (اختياري)"
-          keyboardType="numeric"
-          value={duration}
-          onChangeText={setDuration}
-        />
-        {!tracking ? (
-          <TouchableOpacity style={styles.button} onPress={startTracking}>
-            <Text style={styles.buttonText}>ابدأ التتبع</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={[styles.button, { backgroundColor: '#222' }]} onPress={endTracking}>
-            <Text style={styles.buttonText}>انهاء التتبع</Text>
-          </TouchableOpacity>
-        )}
-        {loading && (
-          <View style={{ alignItems: 'center', marginVertical: 10 }}>
-            <ActivityIndicator size="large" color="#d32f2f" />
-            <Text style={{ color: '#d32f2f', marginTop: 8 }}>جاري الحفظ...</Text>
-          </View>
-        )}
+                      </MapView>
+        <View style={styles.bottomPanel}>
+          <Text style={styles.title}>ابدأ تتبع رحلتك</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="عدد الركاب (اختياري)"
+            keyboardType="numeric"
+            value={passengers}
+            onChangeText={setPassengers}
+          />
+          {!tracking ? (
+            <TouchableOpacity style={styles.button} onPress={startTracking}>
+              <Text style={styles.buttonText}>ابدأ التتبع</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={[styles.button, { backgroundColor: '#222' }]} onPress={endTracking}>
+              <Text style={styles.buttonText}>انهاء التتبع</Text>
+            </TouchableOpacity>
+          )}
+          {loading && (
+            <View style={{ alignItems: 'center', marginVertical: 10 }}>
+              <ActivityIndicator size="large" color="#d32f2f" />
+              <Text style={{ color: '#d32f2f', marginTop: 8 }}>جاري المعالجة...</Text>
+            </View>
+          )}
+        </View>
       </View>
-    </View>
   );
 }
 

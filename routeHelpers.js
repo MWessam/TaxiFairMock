@@ -84,4 +84,23 @@ export async function getGovernorateFromCoords(lat, lng) {
     console.error('Error fetching governorate:', err);
     return '';
   }
+}
+
+// Gets the full address name from coordinates using OpenStreetMap Nominatim
+export async function getAddressFromCoords(lat, lng) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'TaxiFairApp/1.0',
+        'Accept-Language': 'ar,en'
+      }
+    });
+    if (!res.ok) throw new Error('Nominatim error');
+    const data = await res.json();
+    return data.display_name || '';
+  } catch (err) {
+    console.error('Error fetching address:', err);
+    return '';
+  }
 } 

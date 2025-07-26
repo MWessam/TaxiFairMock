@@ -142,7 +142,7 @@ export default function TripForm({ mode = 'submit' }) {
       
       // Navigate to FareResults with appropriate data
       router.push({
-        pathname: '/(tabs)/FareResults',
+        pathname: '/(other)/FareResults',
         params: {
           from: from.address,
           to: to.address,
@@ -215,9 +215,9 @@ export default function TripForm({ mode = 'submit' }) {
     // Small delay to ensure bottom sheet is closed
     setTimeout(() => {
       const coords = type === 'from' ? { lat: from.lat, lng: from.lng } : { lat: to.lat, lng: to.lng };
-      const returnTo = isEstimateMode ? '/(tabs)/EstimateFare' : '/(tabs)/SubmitTrip';
+      const returnTo = isEstimateMode ? '/(other)/EstimateFare' : '/(tabs)/SubmitTrip';
       router.push({ 
-        pathname: '/(tabs)/PlacePicker', 
+        pathname: '/(other)/PlacePicker', 
         params: { 
           type, 
           lat: coords.lat, 

@@ -1,7 +1,7 @@
 import 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, FlatList, Dimensions, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, FlatList, Dimensions, ScrollView, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/constants/ThemeContext';
 import { getAvailableGovernorates } from '@/constants/Colors';
@@ -15,9 +15,29 @@ export default function Home() {
   const availableGovernorates = getAvailableGovernorates();
   const currentGovData = availableGovernorates.find(gov => gov.key === currentGovernorate);
 
+  // Animation values for buttons
+  const buttonScale1 = new Animated.Value(1);
+  const buttonScale2 = new Animated.Value(1);
+  const buttonScale3 = new Animated.Value(1);
+
   const handleGovernorateSelect = (governorateKey) => {
     changeGovernorate(governorateKey);
     setShowGovernorateModal(false);
+  };
+
+  const animateButton = (buttonScale, callback) => {
+    Animated.sequence([
+      Animated.timing(buttonScale, {
+        toValue: 0.95,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(buttonScale, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start(callback);
   };
 
   const styles = createStyles(theme);
@@ -46,32 +66,41 @@ export default function Home() {
 
           {/* Three main buttons */}
           <View style={styles.buttonsContainer}>
-            <TouchableOpacity 
-              style={styles.mainButton} 
-              onPress={() => router.push('/(tabs)/SubmitTrip')}
-            >
-              <Text style={styles.buttonIcon}>🚗</Text>
-              <Text style={styles.buttonTitle}>شارك رحلتك</Text>
-              <Text style={styles.buttonSubtitle}>شارك تكلفة الرحلة مع الآخرين</Text>
-            </TouchableOpacity>
+            <Animated.View style={{ transform: [{ scale: buttonScale1 }] }}>
+              <TouchableOpacity 
+                style={styles.mainButton} 
+                onPress={() => animateButton(buttonScale1, () => router.push('/(tabs)/SubmitTrip'))}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.buttonIcon}>🚗</Text>
+                <Text style={styles.buttonTitle}>شارك رحلتك</Text>
+                <Text style={styles.buttonSubtitle}>شارك تكلفة الرحلة مع الآخرين</Text>
+              </TouchableOpacity>
+            </Animated.View>
 
-            <TouchableOpacity 
-              style={styles.mainButton} 
-              onPress={() => router.push('/(tabs)/EstimateFare')}
-            >
-              <Text style={styles.buttonIcon}>💰</Text>
-              <Text style={styles.buttonTitle}>احسب الأجرة</Text>
-              <Text style={styles.buttonSubtitle}>احسب تكلفة رحلتك قبل السفر</Text>
-            </TouchableOpacity>
+            <Animated.View style={{ transform: [{ scale: buttonScale2 }] }}>
+              <TouchableOpacity 
+                style={styles.mainButton} 
+                onPress={() => animateButton(buttonScale2, () => router.push('/(other)/EstimateFare'))}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.buttonIcon}>💰</Text>
+                <Text style={styles.buttonTitle}>احسب الأجرة</Text>
+                <Text style={styles.buttonSubtitle}>احسب تكلفة رحلتك قبل السفر</Text>
+              </TouchableOpacity>
+            </Animated.View>
 
-            <TouchableOpacity 
-              style={styles.mainButton} 
-              onPress={() => router.push('/(tabs)/TrackRide')}
-            >
-              <Text style={styles.buttonIcon}>📍</Text>
-              <Text style={styles.buttonTitle}>تتبع الرحلة</Text>
-              <Text style={styles.buttonSubtitle}>تتبع رحلتك في الوقت الفعلي</Text>
-            </TouchableOpacity>
+            <Animated.View style={{ transform: [{ scale: buttonScale3 }] }}>
+              <TouchableOpacity 
+                style={styles.mainButton} 
+                onPress={() => animateButton(buttonScale3, () => router.push('/(tabs)/TrackRide'))}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.buttonIcon}>📍</Text>
+                <Text style={styles.buttonTitle}>تتبع الرحلة</Text>
+                <Text style={styles.buttonSubtitle}>تتبع رحلتك في الوقت الفعلي</Text>
+              </TouchableOpacity>
+            </Animated.View>
           </View>
         </View>
       </ScrollView>
@@ -105,6 +134,7 @@ export default function Home() {
                     currentGovernorate === item.key && styles.selectedGovernorateItem
                   ]}
                   onPress={() => handleGovernorateSelect(item.key)}
+                  activeOpacity={0.7}
                 >
                   <View style={[styles.colorPreview, { backgroundColor: item.primary }]} />
                   <Text style={[

@@ -26,9 +26,24 @@ export default function RootLayout() {
       <BottomSheetModalProvider>
       <ThemeProvider>
         <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <Stack>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              // Add smooth transitions
+              animation: 'slide_from_right',
+              animationDuration: 300,
+              // Add gesture handling
+              gestureEnabled: true,
+              gestureDirection: 'horizontal',
+            }}>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="+not-found" />
+            <Stack.Screen 
+              name="+not-found" 
+              options={{
+                animation: 'fade',
+                animationDuration: 200,
+              }}
+            />
           </Stack>
           <StatusBar style="auto" />
         </NavigationThemeProvider>
